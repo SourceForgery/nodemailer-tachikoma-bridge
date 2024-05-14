@@ -1,0 +1,7 @@
+client.key
+client.crt
+run.sh
+build/
+.idea/
+.go/
+tachikoma-bridge
