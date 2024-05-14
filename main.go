@@ -2,7 +2,7 @@ package main
 
 import (
 	"crypto/tls"
-	"github.com/SourceForgery/tachikoma-bridge/build/generated/generated/tachikoma"
+	"github.com/SourceForgery/tachikoma-bridge/build/generated/github.com/SourceForgery/tachikoma"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/jessevdk/go-flags"
 	"github.com/pkg/errors"
