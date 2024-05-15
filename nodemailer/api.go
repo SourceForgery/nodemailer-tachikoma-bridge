@@ -1,5 +1,7 @@
 package nodemailer
 
+const CAMPAIGN_METADATA_KEY = "campaign"
+
 /**
  * Subset of the nodemailer api for easy integration.
  */
@@ -15,16 +17,17 @@ type NodeMailerAttachment struct {
 	ContentType   string `json:"contentType"`
 }
 
-type NodeMailerApi struct {
-	From        []NodeMailerAddress    `json:"from"`
+type NodeMailerEmail struct {
+	From        NodeMailerAddress      `json:"from"`
 	To          []NodeMailerAddress    `json:"to"`
 	Cc          []NodeMailerAddress    `json:"cc"`
-	Bcc         []NodeMailerAddress    `json:"bcc"`
+	Bcc         []string               `json:"bcc"`
 	Subject     string                 `json:"subject"`
 	Text        string                 `json:"text"`
 	Html        string                 `json:"html"`
 	Attachments []NodeMailerAttachment `json:"attachments"`
-	ReplyTo     []NodeMailerAddress    `json:"replyTo"`
-	InReplyTo   string                 `json:"inReplyTo"`
-	References  []string               `json:"references"`
+	ReplyTo     string                 `json:"replyTo"`
+	//InReplyTo   string                 `json:"inReplyTo"`
+	//References  []string               `json:"references"`
+	CampaignId string `json:"campaignId"` // This is make-believe
 }

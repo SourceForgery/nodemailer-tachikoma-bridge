@@ -2,10 +2,10 @@ package main
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"github.com/SourceForgery/tachikoma-bridge/build/generated/github.com/SourceForgery/tachikoma"
-	"github.com/golang/protobuf/ptypes/timestamp"
+	"github.com/SourceForgery/tachikoma-bridge/nodemailer"
 	"github.com/jessevdk/go-flags"
-	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
@@ -25,18 +25,18 @@ var logger zerolog.Logger
 var opts struct {
 	// Slice of bool will append 'true' each time the option
 	// is encountered (can be set multiple times, like -vvv)
-	Verbose         []bool `short:"v" long:"verbose" description:"Show verbose debug information"`
-	Quiet           bool   `short:"q" long:"quiet" description:"Be very quiet"`
-	LoggingFormat   string `short:"l" long:"logging" choice:"coloured" choice:"plain" choice:"json" default:"coloured" description:"Log output format"`
-	CertificatePath string `short:"c" long:"certificate" description:"Path to certificate"`
-	KeyPath         string `short:"k" long:"key" description:"Path to Key"`
-	APIKey          string `short:"a" long:"apikey" description:"ApiKey"`
-	Uri             string `short:"u" long:"uri" description:"URI to Tachikoma"`
-	ListeningPort   string `short:"p" long:"port" default:"3100" description:"Listening Port"`
-	WebhookUri      string `short:"w" long:"webhook" description:"URI to Parcelvoy webhook"`
+	Verbose         []bool  `short:"v" long:"verbose" description:"Show verbose debug information"`
+	Quiet           bool    `short:"q" long:"quiet" description:"Be very quiet"`
+	LoggingFormat   string  `short:"l" long:"logging" choice:"coloured" choice:"plain" choice:"json" default:"coloured" description:"Log output format"`
+	CertificatePath string  `short:"c" long:"certificate" description:"Path to certificate"`
+	KeyPath         string  `short:"k" long:"key" description:"Path to Key"`
+	APIKey          string  `short:"a" long:"apikey" description:"ApiKey"`
+	Uri             url.URL `short:"u" long:"uri" description:"URI to Tachikoma"`
+	ListeningPort   string  `short:"p" long:"port" default:"3100" description:"Listening Port"`
+	WebhookUri      url.URL `short:"w" long:"webhook" description:"URI to Parcelvoy webhook"`
 }
 
-func initalization() {
+func parseOptions() {
 	_, err := flags.ParseArgs(&opts, os.Args)
 	if err != nil {
 		log.Err(err)
@@ -76,52 +76,58 @@ func initalization() {
 	}
 }
 
-func main() {
-	initalization()
-	url, err := url.Parse(opts.Uri)
-	if err != nil {
-		log.Fatal().Err(err).Msgf("Not a valid URI: %s", opts.Uri)
-	}
-
+func createGrpcConn() (conn *grpc.ClientConn, ctx context.Context) {
 	cert, err := tls.LoadX509KeyPair(opts.CertificatePath, opts.KeyPath)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to load client certificate")
+		log.Fatal().Err(err).Msgf("failed to load client certificates: '%s' and '%s'", opts.CertificatePath, opts.KeyPath)
 	}
 
 	creds := credentials.NewTLS(&tls.Config{
 		Certificates: []tls.Certificate{cert},
 	})
 	port := "443"
-	if url.Port() != "" {
-		port = url.Port()
+	if opts.Uri.Port() != "" {
+		port = opts.Uri.Port()
 	}
 
-	conn, err := grpc.Dial(url.Host+":"+port, grpc.WithTransportCredentials(creds))
+	conn, err = grpc.Dial(opts.Uri.Host+":"+port, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to dial gRPC server")
 	}
+	ctx = metadata.AppendToOutgoingContext(context.Background(), "x-apitoken", opts.APIKey)
+	return
+}
+
+func main() {
+	parseOptions()
+	conn, ctx := createGrpcConn()
 	defer func(conn *grpc.ClientConn) {
 		_ = conn.Close()
 	}(conn)
 
-	ctx := metadata.AppendToOutgoingContext(context.Background(), "x-apitoken", opts.APIKey)
+	go serve(conn, ctx)
 
-	go serve()
-	//_, err = sendMail(conn, ctx)
-	//if err != nil {
-	//	log.Fatal().Err(err).Msg("sendMail function failed, go shoot yourself")
-	//}
+	streamNotifications(conn, ctx)
+}
 
+func streamNotifications(conn *grpc.ClientConn, ctx context.Context) {
 	client := tachikoma.NewDeliveryNotificationServiceClient(conn)
-	streamClient, err := client.NotificationStreamWithKeepAlive(ctx, &tachikoma.NotificationStreamParameters{
-		IncludeTrackingData: true,
-		IncludeSubject:      true,
-		IncludeMetricsData:  true,
-		Tags:                nil,
-	})
+	streamClient, err := client.NotificationStreamWithKeepAlive(
+		ctx,
+		&tachikoma.NotificationStreamParameters{
+			IncludeTrackingData: true,
+			IncludeSubject:      true,
+			IncludeMetricsData:  true,
+		},
+	)
+	if err != nil {
+		// End of stream
+		return
+	}
 	for {
-		notification, err := streamClient.Recv()
-		if err == io.EOF {
+		var notification *tachikoma.EmailNotificationOrKeepAlive
+		notification, err = streamClient.Recv()
+		if err == io.EOF || notification == nil {
 			// End of stream
 			break
 		}
@@ -129,18 +135,47 @@ func main() {
 			log.Fatal().Err(err).Msg("failed to receive notification")
 		}
 		if notification.GetEmailNotification() != nil {
-			handleNotification(notification.GetEmailNotification())
+			nodemailer.SendEvent(notification.GetEmailNotification(), opts.WebhookUri)
 		}
 	}
 }
 
-func serve() {
+func parseAndSend(conn *grpc.ClientConn, ctx context.Context, body io.ReadCloser) (err error) {
+	bytes, err := io.ReadAll(body)
+	if err != nil {
+		return
+	}
+
+	var email nodemailer.NodeMailerEmail
+	err = json.Unmarshal(bytes, &email)
+	if err != nil {
+		return
+	}
+	_, err = nodemailer.SendMail(conn, ctx, email)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func serve(conn *grpc.ClientConn, ctx context.Context) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tachikoma/sendEmail", func(writer http.ResponseWriter, request *http.Request) {
-		writer.WriteHeader(204)
-		_, err := writer.Write([]byte{})
+		body := request.Body
+		defer func(body io.ReadCloser) {
+			_ = body.Close()
+		}(body)
+		err := parseAndSend(conn, ctx, body)
 		if err != nil {
-			logger.Error().Err(err).Msg("Write failed")
+			logger.Error().Err(err).Msg("Failed to parse send email")
+			writer.WriteHeader(400)
+		} else {
+			writer.WriteHeader(204)
+		}
+
+		_, err = writer.Write([]byte{})
+		if err != nil {
+			logger.Error().Err(err).Msg("write failed")
 		}
 	})
 
@@ -150,62 +185,6 @@ func serve() {
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to start http server")
 	}
-}
-
-func handleNotification(notification *tachikoma.EmailNotification) {
-	log.Info().Msgf("got notification with folloing data: %s", notification.String())
-}
-
-func sendMail(conn *grpc.ClientConn, ctx context.Context) (response *tachikoma.EmailQueueStatus, err error) {
-	client := tachikoma.NewMailDeliveryServiceClient(conn)
-	namedEmailAdress := tachikoma.NamedEmailAddress{Name: "hej", Email: "victor.lindell@youcruit.com"}
-	emailRecipent := tachikoma.EmailRecipient{NamedEmail: &namedEmailAdress}
-	recipents := []*tachikoma.EmailRecipient{&emailRecipent}
-	staticBody := tachikoma.StaticBody{
-		HtmlBody: "this is an <i>html</i> <b>body</b>",
-		Subject:  "tachikoma bridge works: " + time.Now().String(),
-	}
-	caos := tachikoma.OutgoingEmail_Static{
-		Static: &staticBody,
-	}
-	outgoingEmail := tachikoma.OutgoingEmail{
-		Recipients: recipents,
-		Bcc:        nil,
-		From: &tachikoma.NamedEmailAddress{
-			Email: "victor.lindell@staging.youcruit.com",
-			Name:  "Victor Lindell",
-		},
-		ReplyTo: &tachikoma.EmailAddress{
-			Email: "victor.lindell@staging.youcruit.com",
-		},
-		Body:    &caos,
-		Headers: nil,
-		TrackingData: &tachikoma.TrackingData{
-			TrackingDomain: "",
-			Tags:           nil,
-			Metadata:       nil,
-		},
-		SendAt: &timestamp.Timestamp{
-			Seconds: 0,
-			Nanos:   0,
-		},
-		SigningDomain:          "",
-		Attachments:            nil,
-		RelatedAttachments:     nil,
-		UnsubscribeRedirectUri: "",
-		InlineCss:              false,
-	}
-
-	resp, err := client.SendEmail(ctx, &outgoingEmail)
-	if err != nil {
-		return nil, errors.Wrap(err, "client sendmail failed")
-	}
-	response, err = resp.Recv()
-	if err != nil {
-		return nil, errors.Wrap(err, "getting sendmail response failed")
-	}
-	log.Info().Msgf("Response: %s", response)
-	return
 }
 
 //go:generate go run buildscripts/gen.go
