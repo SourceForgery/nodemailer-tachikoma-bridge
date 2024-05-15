@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"time"
@@ -82,32 +83,19 @@ func main() {
 		log.Fatal().Err(err).Msgf("Not a valid URI: %s", opts.Uri)
 	}
 
-	// Load the client certificates from disk
 	cert, err := tls.LoadX509KeyPair(opts.CertificatePath, opts.KeyPath)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to load client certificate")
 	}
 
-	// Load the CA certificate
-	//caCert, err := ioutil.ReadFile("ca.crt")
-	//if err != nil {
-	//	log.Fatalf("failed to read CA certificate: %v", err)
-	//}
-	//caCertPool := x509.NewCertPool()
-	//if !caCertPool.AppendCertsFromPEM(caCert) {
-	//	log.Fatalf("failed to append CA certificate to pool")
-	//}
-
-	// Create the transport credentials
 	creds := credentials.NewTLS(&tls.Config{
 		Certificates: []tls.Certificate{cert},
-		//RootCAs:      caCertPool,
 	})
 	port := "443"
 	if url.Port() != "" {
 		port = url.Port()
 	}
-	// Create a new gRPC client with the credentials
+
 	conn, err := grpc.Dial(url.Host+":"+port, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to dial gRPC server")
@@ -118,6 +106,7 @@ func main() {
 
 	ctx := metadata.AppendToOutgoingContext(context.Background(), "x-apitoken", opts.APIKey)
 
+	go serve()
 	//_, err = sendMail(conn, ctx)
 	//if err != nil {
 	//	log.Fatal().Err(err).Msg("sendMail function failed, go shoot yourself")
@@ -142,6 +131,24 @@ func main() {
 		if notification.GetEmailNotification() != nil {
 			handleNotification(notification.GetEmailNotification())
 		}
+	}
+}
+
+func serve() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/tachikoma/sendEmail", func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(204)
+		_, err := writer.Write([]byte{})
+		if err != nil {
+			logger.Error().Err(err).Msg("Write failed")
+		}
+	})
+
+	var addr = ":" + opts.ListeningPort
+	logger.Info().Msgf("Listening to %s", addr)
+	err := http.ListenAndServe(addr, mux)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to start http server")
 	}
 }
 
