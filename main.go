@@ -201,4 +201,5 @@ func sendMail(conn *grpc.ClientConn, ctx context.Context) (response *tachikoma.E
 	return
 }
 
+//go:generate go run buildscripts/gen.go
 //go:generate protoc --go_out=build/generated --go-grpc_out=build/generated -I=./build/protobuf build/protobuf/com/sourceforgery/tachikoma/grpc/frontend/maildelivery/maildelivery.proto build/protobuf/com/sourceforgery/tachikoma/grpc/frontend/tracking/mailtracking.proto build/protobuf/com/sourceforgery/tachikoma/grpc/frontend/common.proto

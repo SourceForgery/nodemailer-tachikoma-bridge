@@ -10,8 +10,6 @@ import (
 	"strings"
 )
 
-//go:generate go run download.go
-
 const version = "1.0.167"
 
 func main() {
