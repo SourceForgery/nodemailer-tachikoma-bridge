@@ -27,7 +27,7 @@ type NodeMailerEmail struct {
 	Html        string                 `json:"html"`
 	Attachments []NodeMailerAttachment `json:"attachments"`
 	ReplyTo     string                 `json:"replyTo"`
+	Headers     map[string]string      `json:"headers"` // This is make-believe
 	//InReplyTo   string                 `json:"inReplyTo"`
 	//References  []string               `json:"references"`
-	CampaignId string `json:"campaignId"` // This is make-believe
 }

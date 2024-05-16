@@ -69,8 +69,9 @@ func convertToTachikoma(email NodeMailerEmail) (tachikomaEmail tachikoma.Outgoin
 				Subject:  email.Text,
 			},
 		},
+		Headers: email.Headers,
 		TrackingData: &tachikoma.TrackingData{
-			Metadata: map[string]string{CAMPAIGN_METADATA_KEY: email.CampaignId},
+			Metadata: email.Headers,
 		},
 		Attachments: attachments,
 	}

@@ -25,15 +25,15 @@ var logger zerolog.Logger
 var opts struct {
 	// Slice of bool will append 'true' each time the option
 	// is encountered (can be set multiple times, like -vvv)
-	Verbose         []bool  `short:"v" long:"verbose" description:"Show verbose debug information"`
-	Quiet           bool    `short:"q" long:"quiet" description:"Be very quiet"`
-	LoggingFormat   string  `short:"l" long:"logging" choice:"coloured" choice:"plain" choice:"json" default:"coloured" description:"Log output format"`
-	CertificatePath string  `short:"c" long:"certificate" description:"Path to certificate"`
-	KeyPath         string  `short:"k" long:"key" description:"Path to Key"`
-	APIKey          string  `short:"a" long:"apikey" description:"ApiKey"`
-	Uri             url.URL `short:"u" long:"uri" description:"URI to Tachikoma"`
-	ListeningPort   string  `short:"p" long:"port" default:"3100" description:"Listening Port"`
-	WebhookUri      url.URL `short:"w" long:"webhook" description:"URI to Parcelvoy webhook"`
+	Verbose         []bool `short:"v" long:"verbose" description:"Show verbose debug information"`
+	Quiet           bool   `short:"q" long:"quiet" description:"Be very quiet"`
+	LoggingFormat   string `short:"l" long:"logging" choice:"coloured" choice:"plain" choice:"json" default:"coloured" description:"Log output format"`
+	CertificatePath string `short:"c" long:"certificate" description:"Path to certificate"`
+	KeyPath         string `short:"k" long:"key" description:"Path to Key"`
+	APIKey          string `short:"a" long:"apikey" description:"ApiKey"`
+	Uri             string `short:"u" long:"uri" description:"URI to Tachikoma"`
+	ListeningPort   string `short:"p" long:"port" default:"3100" description:"Listening Port"`
+	WebhookUri      string `short:"w" long:"webhook" description:"URI to Parcelvoy webhook"`
 }
 
 func parseOptions() {
@@ -58,6 +58,7 @@ func parseOptions() {
 		logger.Panic().Msgf("What the f is %s", opts.LoggingFormat)
 	}
 	logger = logger.With().Timestamp().Logger()
+	nodemailer.Logger = logger
 
 	switch len(opts.Verbose) {
 	case 0:
@@ -74,25 +75,36 @@ func parseOptions() {
 	if opts.Quiet {
 		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
 	}
+
+	if opts.WebhookUri == "" {
+		logger.Fatal().Msg("webhook is empty")
+	}
+
+	if opts.Uri == "" {
+		logger.Fatal().Msg("uri is empty")
+	}
 }
 
 func createGrpcConn() (conn *grpc.ClientConn, ctx context.Context) {
+	uri, err := url.Parse(opts.Uri)
+	if err != nil {
+		logger.Fatal().Err(err).Msgf("Not a valid URI: %s", opts.Uri)
+	}
 	cert, err := tls.LoadX509KeyPair(opts.CertificatePath, opts.KeyPath)
 	if err != nil {
-		log.Fatal().Err(err).Msgf("failed to load client certificates: '%s' and '%s'", opts.CertificatePath, opts.KeyPath)
+		logger.Fatal().Err(err).Msgf("failed to load client certificates: '%s' and '%s'", opts.CertificatePath, opts.KeyPath)
 	}
 
 	creds := credentials.NewTLS(&tls.Config{
 		Certificates: []tls.Certificate{cert},
 	})
 	port := "443"
-	if opts.Uri.Port() != "" {
-		port = opts.Uri.Port()
+	if uri.Port() != "" {
+		port = uri.Port()
 	}
-
-	conn, err = grpc.Dial(opts.Uri.Host+":"+port, grpc.WithTransportCredentials(creds))
+	conn, err = grpc.Dial(uri.Host+":"+port, grpc.WithTransportCredentials(creds))
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to dial gRPC server")
+		logger.Fatal().Err(err).Msg("failed to dial gRPC server")
 	}
 	ctx = metadata.AppendToOutgoingContext(context.Background(), "x-apitoken", opts.APIKey)
 	return
@@ -107,10 +119,17 @@ func main() {
 
 	go serve(conn, ctx)
 
-	streamNotifications(conn, ctx)
+	err := streamNotifications(conn, ctx)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to receive notification")
+	}
 }
 
-func streamNotifications(conn *grpc.ClientConn, ctx context.Context) {
+func streamNotifications(conn *grpc.ClientConn, ctx context.Context) (err error) {
+	webhookUrl, err := url.Parse(opts.WebhookUri)
+	if err != nil {
+		return
+	}
 	client := tachikoma.NewDeliveryNotificationServiceClient(conn)
 	streamClient, err := client.NotificationStreamWithKeepAlive(
 		ctx,
@@ -121,21 +140,22 @@ func streamNotifications(conn *grpc.ClientConn, ctx context.Context) {
 		},
 	)
 	if err != nil {
-		// End of stream
 		return
 	}
 	for {
 		var notification *tachikoma.EmailNotificationOrKeepAlive
 		notification, err = streamClient.Recv()
-		if err == io.EOF || notification == nil {
-			// End of stream
-			break
+		if err == io.EOF {
+			return
+		}
+		if notification == nil {
+			continue
 		}
 		if err != nil {
-			log.Fatal().Err(err).Msg("failed to receive notification")
+			return
 		}
 		if notification.GetEmailNotification() != nil {
-			nodemailer.SendEvent(notification.GetEmailNotification(), opts.WebhookUri)
+			nodemailer.SendEvent(notification.GetEmailNotification(), webhookUrl)
 		}
 	}
 }
@@ -145,12 +165,13 @@ func parseAndSend(conn *grpc.ClientConn, ctx context.Context, body io.ReadCloser
 	if err != nil {
 		return
 	}
-
+	//logger.Info().Msg(string(bytes))
 	var email nodemailer.NodeMailerEmail
 	err = json.Unmarshal(bytes, &email)
 	if err != nil {
 		return
 	}
+	logger.Debug().Any("msg", email).Msg(string(bytes))
 	_, err = nodemailer.SendMail(conn, ctx, email)
 	if err != nil {
 		return

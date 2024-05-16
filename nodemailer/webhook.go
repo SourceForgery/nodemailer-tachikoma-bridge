@@ -17,7 +17,7 @@ type Headers struct {
 }
 
 type Message struct {
-	Headers Headers `json:"headers"`
+	Headers map[string]string `json:"headers"`
 }
 
 type EventData struct {
@@ -30,7 +30,7 @@ type Provider struct {
 	EventData EventData `json:"event-data"`
 }
 
-func SendEvent(event *tachikoma.EmailNotification, parselvoyUri url.URL) {
+func SendEvent(event *tachikoma.EmailNotification, parselvoyUri *url.URL) {
 	//url := "http://localhost:3000/api/providers/J7O98WX4ZL/json"
 
 	eventType := "something undefined"
@@ -43,9 +43,7 @@ func SendEvent(event *tachikoma.EmailNotification, parselvoyUri url.URL) {
 			Recipient: event.RecipientEmailAddress.Email,
 			Event:     eventType,
 			Message: Message{
-				Headers: Headers{
-					XCampaignID: event.GetEmailTrackingData().Metadata[CAMPAIGN_METADATA_KEY],
-				},
+				Headers: event.GetEmailTrackingData().Metadata,
 			},
 		},
 	}
@@ -53,14 +51,14 @@ func SendEvent(event *tachikoma.EmailNotification, parselvoyUri url.URL) {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		Logger.Fatal().Err(err).Msg("Error occurred during marshalling: ")
-		return
 	}
 
 	req, err := http.NewRequest("POST", parselvoyUri.String(), bytes.NewBuffer(jsonData))
 	if err != nil {
 		Logger.Fatal().Err(err).Msg("Error on creating request object: ")
-		return
 	}
+
+	Logger.Debug().Any("msg", data).Msg(string(jsonData))
 
 	req.Header.Set("Content-Type", "application/json")
 
@@ -68,7 +66,6 @@ func SendEvent(event *tachikoma.EmailNotification, parselvoyUri url.URL) {
 	resp, err := client.Do(req)
 	if err != nil {
 		Logger.Fatal().Err(err).Msg("Error on dispatching request: ")
-		return
 	}
 
 	defer func(Body io.ReadCloser) {
