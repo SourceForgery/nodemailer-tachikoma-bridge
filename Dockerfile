@@ -13,8 +13,7 @@ RUN ./gow mod download
 
 ADD . /go/
 
-RUN ./gow generate
-RUN ./gow build
+RUN ./gow generate && ./gow build
 
 FROM ubuntu:22.04
 RUN apt-get update && apt-get install -y ca-certificates && apt-get clean && rm -rf /var/lib/apt/lists/*

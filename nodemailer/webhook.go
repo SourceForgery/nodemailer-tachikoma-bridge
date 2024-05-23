@@ -42,6 +42,8 @@ func SendEvent(event *tachikoma.EmailNotification, parselvoyUri *url.URL) {
 		eventType = "bounced"
 	} else if complained := event.GetReportedAbuseEvent(); complained != nil {
 		eventType = "complained"
+	} else if unsubscribed := event.GetUnsubscribedEvent(); unsubscribed != nil {
+		eventType = "unsubscribed"
 	}
 
 	if eventType == "" {
