@@ -65,8 +65,9 @@ func convertToTachikoma(email NodeMailerEmail) (tachikomaEmail tachikoma.Outgoin
 
 		Body: &tachikoma.OutgoingEmail_Static{
 			Static: &tachikoma.StaticBody{
-				HtmlBody: email.Html,
-				Subject:  email.Subject,
+				HtmlBody:      email.Html,
+				Subject:       email.Subject,
+				PlaintextBody: email.Text,
 			},
 		},
 		Headers: email.Headers,

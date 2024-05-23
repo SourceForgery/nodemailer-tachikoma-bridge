@@ -55,7 +55,6 @@ func SendEvent(event *tachikoma.EmailNotification, parselvoyUri *url.URL) {
 			Message: Message{
 				Headers: event.GetEmailTrackingData().Metadata,
 			},
-			Timestamp:
 		},
 	}
 
