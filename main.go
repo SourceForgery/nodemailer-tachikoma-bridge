@@ -30,7 +30,7 @@ var opts struct {
 	LoggingFormat   string `short:"l" long:"logging" choice:"coloured" choice:"plain" choice:"json" default:"coloured" description:"Log output format"`
 	CertificatePath string `short:"c" long:"certificate" description:"Path to certificate"`
 	KeyPath         string `short:"k" long:"key" description:"Path to Key"`
-	APIKey          string `short:"a" long:"apikey" description:"ApiKey"`
+	APIKey          string `short:"a" long:"apikey" description:"ApiKey e.g. example.com:mysupersecretpassword"`
 	Uri             string `short:"u" long:"uri" description:"URI to Tachikoma"`
 	ListeningPort   string `short:"p" long:"port" default:"3100" description:"Listening Port"`
 	WebhookUri      string `short:"w" long:"webhook" description:"URI to Parcelvoy webhook"`
@@ -77,11 +77,17 @@ func parseOptions() {
 	}
 
 	if opts.WebhookUri == "" {
-		logger.Fatal().Msg("webhook is empty")
+		logger.Fatal().Msg("Please provide webhook URI though param --webhook")
 	}
 
 	if opts.Uri == "" {
-		logger.Fatal().Msg("uri is empty")
+		logger.Fatal().Msg("Please provide uri through param --uri")
+	}
+	if opts.APIKey == "" {
+		opts.APIKey = os.Getenv("TACHIKOMA_AUTH")
+		if opts.APIKey == "" {
+			logger.Fatal().Msg("Please provide with an API-Key either through params --apikey or env TACHIKOMA_AUTH")
+		}
 	}
 }
 

@@ -32,10 +32,20 @@ type Provider struct {
 
 func SendEvent(event *tachikoma.EmailNotification, parselvoyUri *url.URL) {
 	//url := "http://localhost:3000/api/providers/J7O98WX4ZL/json"
-
-	eventType := "something undefined"
+	// 'clicked' | 'opened' | 'bounced' | 'complained' | 'failed'
+	eventType := ""
 	if clicked := event.GetClickedEvent(); clicked != nil {
 		eventType = "clicked"
+	} else if opened := event.GetOpenedEvent(); opened != nil {
+		eventType = "opened"
+	} else if bounced := event.GetHardBouncedEvent(); bounced != nil {
+		eventType = "bounced"
+	} else if complained := event.GetReportedAbuseEvent(); complained != nil {
+		eventType = "complained"
+	}
+
+	if eventType == "" {
+		return
 	}
 
 	data := Provider{
@@ -45,6 +55,7 @@ func SendEvent(event *tachikoma.EmailNotification, parselvoyUri *url.URL) {
 			Message: Message{
 				Headers: event.GetEmailTrackingData().Metadata,
 			},
+			Timestamp:
 		},
 	}
 
@@ -71,4 +82,14 @@ func SendEvent(event *tachikoma.EmailNotification, parselvoyUri *url.URL) {
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(resp.Body)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		Logger.Error().Err(err).Msg("Failed to read body from response")
+	}
+
+	if resp.StatusCode/100 != 2 {
+		Logger.Error().Msgf("Failed to notify about, statuscode: %d, body: %s", resp.StatusCode, string(body))
+	}
+
 }

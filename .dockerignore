@@ -1,0 +1,9 @@
+/.go/wrapper/go/
+/.go/wrapper/tmp/
+/build/
+/.idea/
+/.git/
+/run.sh
+/build.sh
+/client.crt
+/client.key
