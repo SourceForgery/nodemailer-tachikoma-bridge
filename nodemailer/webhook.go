@@ -44,6 +44,10 @@ func SendEvent(event *tachikoma.EmailNotification, parselvoyUri *url.URL) {
 		eventType = "complained"
 	} else if unsubscribed := event.GetUnsubscribedEvent(); unsubscribed != nil {
 		eventType = "unsubscribed"
+	} else if spam := event.GetSpamEvent(); spam != nil {
+		eventType = "spam"
+	} else if delivered := event.GetDeliveredEvent(); delivered != nil {
+		eventType = ""
 	}
 
 	if eventType == "" {
